@@ -1,0 +1,53 @@
+name: CI/CD Pipeline
+
+on: [push]
+
+jobs:
+  deploy-infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+
+  build-and-deploy-docker:
+    needs: deploy-infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Login to AZURE REGISTRY
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.AZURE_REGISTRY_USERNAME }}
+          password: ${{ secrets.AZURE_REGISTRY_ACCESS_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: automationchallengeregistry.azurecr.io/myimage:tag
+
+      - name: Deploy Docker Container to VM
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: ${{ secrets.VM_USERNAME }}
+          password: ${{ secrets.VM_PASSWORD }}
+          script: |
+            docker pull automationchallengeregistry.azurecr.io/myimage:tag
+            docker run -d -p 80:80 -p 443:443 -v /home/ubuntu/nginx-content:/usr/share/nginx/html --name nginx-container automationchallengeregistry.azurecr.io/myimage:tag
